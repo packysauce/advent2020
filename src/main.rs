@@ -19,7 +19,8 @@ struct SeatLocation {
 }
 
 impl SeatLocation {
-    fn new(s: &str) -> Self {
+    fn new<T: AsRef<str>>(s: T) -> Self {
+        let s = s.as_ref();
         assert_eq!(s.len(), 10);
         let row = char_to_bin(&s[0..7], 'F', 'B');
         let column = char_to_bin(&s[7..10], 'L', 'R');
@@ -31,11 +32,18 @@ impl SeatLocation {
     }
 }
 
+impl std::cmp::Ord for SeatLocation {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.seat_id.cmp(&other.seat_id)
+    }
+}
+
 impl std::cmp::PartialOrd for SeatLocation {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.seat_id.partial_cmp(&other.seat_id)
     }
 }
+
 
 fn char_to_bin(s: &str, low: char, high: char) -> u8 {
     let mut out = 0;
@@ -52,14 +60,20 @@ fn char_to_bin(s: &str, low: char, high: char) -> u8 {
 }
 
 fn main() {
-    let mut r = BufReader::new(stdin());
-    let mut max_seat = 0;
-    for line in r.lines().filter_map(Result::ok) {
-        let loc = SeatLocation::new(&line);
-        max_seat = max_seat.max(loc.seat_id)
-    }
+    let r = BufReader::new(stdin());
+    let mut seats: Vec<_> = r.lines()
+        .filter_map(Result::ok)
+        .map(SeatLocation::new)
+        .collect();
+    seats.sort_unstable();
 
-    println!("Highest seat: {}", max_seat);
+    for seats in (&seats).windows(2) {
+        let this = seats[0].seat_id;
+        let next = seats[1].seat_id;
+        if next - this == 2 {
+            println!("missing seat: {}", this + 1);
+        }
+    }
 }
 
 #[cfg(test)]
