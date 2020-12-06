@@ -8,7 +8,7 @@ use std::{
     str::FromStr,
 };
 
-fn crunch_batch(batch: &mut dyn BufRead) -> Vec<u32> {
+fn anybody_said_yes(batch: &mut dyn BufRead) -> Vec<u32> {
     let mut out = Vec::new();
     let mut lines = batch.lines();
     let mut acc = 0;
@@ -25,15 +25,44 @@ fn crunch_batch(batch: &mut dyn BufRead) -> Vec<u32> {
     out
 }
 
+fn everybody_said_yes(batch: &mut dyn BufRead) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut lines = batch.lines();
+    let mut acc = u32::MAX;
+    while let Some(Ok(line)) = lines.next() {
+        if line.is_empty() {
+            out.push(acc);
+            acc = u32::MAX;
+        } else {
+            acc &= str_to_bin(line.trim());
+        }
+    }
+    out.push(acc);
+
+    out
+}
+
+
+
 fn main() {
     let mut r = BufReader::new(stdin());
-    let answers = crunch_batch(&mut r);
+    let mut buf = Vec::new();
+    r.read_to_end(&mut buf).unwrap();
+    use std::io::Cursor;
+    let anybody = anybody_said_yes(&mut Cursor::new(&buf));
+    let everybody = everybody_said_yes(&mut Cursor::new(&buf));
 
-    let yeses: u32 = answers
+    let anybody_yes: u32 = anybody
         .iter()
         .map(|i| i.count_ones())
         .sum();
-    println!("total yes: {}", yeses);
+
+    let everybody_yes: u32 = everybody
+        .iter()
+        .map(|i| i.count_ones())
+        .sum();
+
+    println!("anybody: {}, everybody: {}", anybody_yes, everybody_yes);
 }
 
 fn char_to_bin(c: char) -> u32 {
@@ -66,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn test_examples() {
+    fn test_anybody_said_yes() {
         let data = "abc
 
                         a
@@ -83,7 +112,29 @@ mod tests {
 
                         b\n";
         let mut buf = std::io::Cursor::new(data); 
-        let results = crunch_batch(&mut buf);
+        let results = anybody_said_yes(&mut buf);
         assert_eq!(results, vec![0b111, 0b111, 0b111, 0b1, 0b10]);
+    }
+
+    #[test]
+    fn test_everybody_said_yes() {
+        let data = "abc
+
+                        a
+                        b
+                        c
+
+                        ab
+                        ac
+
+                        a
+                        a
+                        a
+                        a
+
+                        b\n";
+        let mut buf = std::io::Cursor::new(data); 
+        let results = everybody_said_yes(&mut buf);
+        assert_eq!(results, vec![0b111, 0, 0b1, 0b1, 0b10]);
     }
 }
