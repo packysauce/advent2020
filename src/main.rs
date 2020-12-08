@@ -1,140 +1,171 @@
-use num::clamp;
-use std::cmp::Eq;
-use std::hash::Hash;
-use std::io::{BufRead, Read};
+use daggy::{Dag, NodeIndex};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{stdin, BufReader},
-    str::FromStr,
 };
+use std::io::BufRead;
 
-fn anybody_said_yes(batch: &mut dyn BufRead) -> Vec<u32> {
-    let mut out = Vec::new();
-    let mut lines = batch.lines();
-    let mut acc = 0;
-    while let Some(Ok(line)) = lines.next() {
-        if line.is_empty() {
-            out.push(acc);
-            acc = 0;
-        } else {
-            acc |= str_to_bin(line.trim());
-        }
-    }
-    out.push(acc);
+type IndexMap = HashMap<String, NodeIndex>;
+type BagDag = Dag<String, u32>;
 
-    out
+#[derive(Debug)]
+struct Contains(u32);
+
+#[derive(Debug)]
+struct Bags {
+    indices: IndexMap,
+    dag: BagDag,
 }
 
-fn everybody_said_yes(batch: &mut dyn BufRead) -> Vec<u32> {
-    let mut out = Vec::new();
-    let mut lines = batch.lines();
-    let mut acc = u32::MAX;
-    while let Some(Ok(line)) = lines.next() {
-        if line.is_empty() {
-            out.push(acc);
-            acc = u32::MAX;
-        } else {
-            acc &= str_to_bin(line.trim());
-        }
+fn all_ancestors(idx: NodeIndex, dag: &BagDag) -> HashSet<NodeIndex> {
+    use daggy::Walker;
+    let mut set = HashSet::new();
+    let parent_iter = dag.parents(idx);
+    for (_edge, node) in parent_iter.iter(&dag) {
+        set.insert(node);
+        set.extend(all_ancestors(node, &dag));
     }
-    out.push(acc);
-
-    out
+    set
 }
 
+fn bags_contained_by(idx: NodeIndex, dag: &BagDag) -> u32 {
+    use daggy::Walker;
+    let children = dag.children(idx);
+    let mut count = 0;
+    for (e, n) in children.iter(&dag) {
+        let number_of_bags = *dag.edge_weight(e).unwrap();
+        count += number_of_bags + number_of_bags * bags_contained_by(n, &dag);
+    }
+    count
+}
 
+fn parse_line(line: &str) -> (&str, Vec<(u32, &str)>) {
+    lazy_static::lazy_static! {
+        static ref HANDLER: regex::Regex = regex::Regex::new(r"(\d+) (\w+ \w+) bags?").unwrap();
+    };
+
+    let name_len = line
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<&str>>()
+        .join(" ")
+        .len();
+    let mut out = Vec::new();
+    for capture in HANDLER.captures_iter(line) {
+        let count = capture.get(1).unwrap().as_str().parse().unwrap();
+        let name = capture.get(2).unwrap().as_str();
+        out.push((count, name));
+    }
+
+    (&line[0..name_len], out)
+}
+
+fn build_bagdag(reader: &mut dyn BufRead) -> Bags {
+    let mut indices = HashMap::new();
+    let mut dag: BagDag = Dag::new();
+    let mut lines = reader.lines();
+
+    while let Some(Ok(line)) = lines.next() {
+        let (name, children) = parse_line(&line);
+        let parent_name = name.to_string();
+        let parent_index = *indices
+            .entry(parent_name)
+            .or_insert_with(|| dag.add_node(name.to_string()));
+        for (count, child_name) in children {
+            let name = child_name.to_string();
+            let child_index = indices
+                .entry(name)
+                .or_insert_with(|| dag.add_node(child_name.to_string()));
+            dag.add_edge(parent_index, *child_index, count).unwrap();
+        }
+    }
+
+    Bags { indices, dag }
+}
 
 fn main() {
     let mut r = BufReader::new(stdin());
-    let mut buf = Vec::new();
-    r.read_to_end(&mut buf).unwrap();
-    use std::io::Cursor;
-    let anybody = anybody_said_yes(&mut Cursor::new(&buf));
-    let everybody = everybody_said_yes(&mut Cursor::new(&buf));
+    let bags = build_bagdag(&mut r);
+    // part 1 - how many shiny gold options are there
+    let idx = bags.indices.get("shiny gold").unwrap();
+    let ancestors = all_ancestors(*idx, &bags.dag);
+    // part 2 - how much does a shiny gold hold?
+    let bag_count = bags_contained_by(*idx, &bags.dag);
 
-    let anybody_yes: u32 = anybody
-        .iter()
-        .map(|i| i.count_ones())
-        .sum();
+    use daggy::petgraph::dot::{Config, Dot};
+    println!("{:?}", Dot::with_config(&bags.dag, &[]));
 
-    let everybody_yes: u32 = everybody
-        .iter()
-        .map(|i| i.count_ones())
-        .sum();
-
-    println!("anybody: {}, everybody: {}", anybody_yes, everybody_yes);
-}
-
-fn char_to_bin(c: char) -> u32 {
-    c.to_digit(36).unwrap() - 10
-}
-
-fn str_to_bin(s: &str) -> u32 {
-    s.chars()
-        .map(char_to_bin)
-        .fold(0, |init, c| {
-            init | (1 << c)
-        })
+    println!("total: {}", ancestors.len());
+    println!("shiny gold contains {} bags", bag_count);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const DATA: &str = "light red bags contain 1 bright white bag, 2 muted yellow bags.
+dark orange bags contain 3 bright white bags, 4 muted yellow bags.
+bright white bags contain 1 shiny gold bag.
+muted yellow bags contain 2 shiny gold bags, 9 faded blue bags.
+shiny gold bags contain 1 dark olive bag, 2 vibrant plum bags.
+dark olive bags contain 3 faded blue bags, 4 dotted black bags.
+vibrant plum bags contain 5 faded blue bags, 6 dotted black bags.
+faded blue bags contain no other bags.
+dotted black bags contain no other bags.";
+
     #[test]
-    fn test_str_to_bin() {
-        assert_eq!(str_to_bin("abcd"), 0b1111);
-        assert_eq!(str_to_bin("ace"), 0b10101);
-        assert_eq!(str_to_bin("abz"), 0b10000000000000000000000011);
+    fn parse_one_line() {
+        let line = "striped crimson bags contain 2 shiny gold bags, 4 pale indigo bags, 4 light maroon bags.";
+        let (name, contains) = parse_line(line);
+        assert_eq!(name, "striped crimson");
+        assert_eq!(
+            contains,
+            vec![
+                (2u32, "shiny gold"),
+                (4, "pale indigo"),
+                (4, "light maroon")
+            ]
+        );
     }
 
     #[test]
-    fn test_char_to_bin() {
-        assert_eq!(char_to_bin('a'), 0);
-        assert_eq!(char_to_bin('z'), 25);
+    fn test_ancestor_lookup() {
+        let mut reader = std::io::Cursor::new(DATA);
+        let stuff = build_bagdag(&mut reader);
+        let idx = *stuff.indices.get("shiny gold").unwrap();
+        let total = all_ancestors(idx, &stuff.dag);
+        assert_eq!(4, total.len());
     }
 
     #[test]
-    fn test_anybody_said_yes() {
-        let data = "abc
+    fn test_child_lookup() {
+        let mut reader = std::io::Cursor::new(DATA);
+        let stuff = build_bagdag(&mut reader);
 
-                        a
-                        b
-                        c
+        let idx = *stuff.indices.get("shiny gold").unwrap();
+        let total = bags_contained_by(idx, &stuff.dag);
 
-                        ab
-                        ac
-
-                        a
-                        a
-                        a
-                        a
-
-                        b\n";
-        let mut buf = std::io::Cursor::new(data); 
-        let results = anybody_said_yes(&mut buf);
-        assert_eq!(results, vec![0b111, 0b111, 0b111, 0b1, 0b10]);
+        assert_eq!(32, total);
     }
 
     #[test]
-    fn test_everybody_said_yes() {
-        let data = "abc
+    fn test_child_simple_case() {
+        let data = "shiny gold bags contain 2 dark red bags.
+dark red bags contain 2 dark orange bags.
+dark orange bags contain 2 dark yellow bags.
+dark yellow bags contain 2 dark green bags.
+dark green bags contain 2 dark blue bags.
+dark blue bags contain 2 dark violet bags.
+dark violet bags contain no other bags.";
+        let mut reader = std::io::Cursor::new(data);
+        let stuff = build_bagdag(&mut reader);
 
-                        a
-                        b
-                        c
+        let idx = *stuff.indices.get("shiny gold").unwrap();
+        let total = bags_contained_by(idx, &stuff.dag);
 
-                        ab
-                        ac
-
-                        a
-                        a
-                        a
-                        a
-
-                        b\n";
-        let mut buf = std::io::Cursor::new(data); 
-        let results = everybody_said_yes(&mut buf);
-        assert_eq!(results, vec![0b111, 0, 0b1, 0b1, 0b10]);
+        assert_eq!(126, total);
     }
+
+    #[test]
+    fn test_build_map_from_strings() {}
 }
