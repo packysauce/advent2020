@@ -27,10 +27,27 @@ fn valid_xmas(window: &[u32]) -> Option<(u32, u32)> {
     None
 }
 
+fn find_subsum(window: &[u32], needle: u32) -> Option<Vec<u32>> {
+    // if window is 10 things long, we wanna take 2, then 3, then 4, etc
+    // until we find a sum equalling the needle
+    for window_length in 2..window.len() {
+        for subwindow in window.windows(window_length) {
+            let subsum: u64 = subwindow.iter().map(|s| *s as u64).sum();
+            if subsum == needle as u64 {
+                return Some(subwindow.to_vec())
+            }
+        }
+    }
+    None
+}
+
 fn main() {
+    /*
     let mut r = BufReader::new(stdin());
     let mut data = String::new();
     r.read_to_string(&mut data).unwrap();
+    */
+    let data = include_str!("../inputs/day9.txt");
 
     let lines = data
         .lines()
@@ -41,7 +58,7 @@ fn main() {
     let out = lines.windows(preamble_len + 1)
         .filter_map(|s| {
             if valid_xmas(s).is_none() {
-                s.last()
+                s.last().cloned()
             } else {
                 None
             }
@@ -49,6 +66,12 @@ fn main() {
 
     for i in out {
         println!("first bad one is {}", i);
+        if let Some(x) = find_subsum(&lines, i) {
+            println!("{:?}", x);
+            let min = x.iter().min().unwrap();
+            let max = x.iter().max().unwrap();
+            println!("... key is {}", min + max);
+        }
     }
 }
 
@@ -79,6 +102,14 @@ mod tests {
             576,
         ];
     }
+
+    #[test]
+    fn subsum_thing_works() {
+        let data = vec![2,3,4,5,6,8,9,10,11];
+        let result = find_subsum(&data, 7);
+        assert_eq!(result, Some(vec![3,4]));
+    }
+
     #[test]
     fn test_valid_number() {
         let preamble_len = 5;
