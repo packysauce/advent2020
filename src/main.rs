@@ -1,170 +1,85 @@
-// BoatVM - still a better love story than kubernetes
-
-#[derive(Debug, PartialEq, Eq)]
-struct BoatNavigation {
-    waypoint_x: isize,
-    waypoint_y: isize,
-    ship_x: isize,
-    ship_y: isize,
-}
-
-impl Default for BoatNavigation {
-    fn default() -> Self {
-        Self {
-            waypoint_x: 10,
-            waypoint_y: 1,
-            ship_x: 0,
-            ship_y: 0,
-        }
-    }
-}
-
-impl BoatNavigation {
-    fn manhattan(&self) -> usize {
-        (self.ship_x.abs() + self.ship_y.abs()) as usize
-    }
-
-    fn run_one(&mut self, s: &str) -> Option<()> {
-        let command = s.get(..1)?;
-        let value = s.get(1..)?.parse::<isize>().ok()?;
-
-        match command {
-            "N" => self.waypoint_y += value,
-            "S" => self.waypoint_y -= value,
-            "E" => self.waypoint_x += value,
-            "W" => self.waypoint_x -= value,
-            "F" => {
-                self.ship_x += value * self.waypoint_x;
-                self.ship_y += value * self.waypoint_y;
-            },
-            // left or right rotate
-            x if x == "L" || x == "R" => {
-                let rot_val = if x == "L" { value } else { -value };
-                let x = self.waypoint_x;
-                let y = self.waypoint_y;
-                match (rot_val + 360) % 360 {
-                    90 => {
-                        self.waypoint_x = -y;
-                        self.waypoint_y = x;
-                    }
-                    180 => {
-                        self.waypoint_x = -x;
-                        self.waypoint_y = -y;
-                    }
-                    270 => {
-                        self.waypoint_x = y;
-                        self.waypoint_y = -x;
-                    }
-                    // none of these should show up
-                    x => panic!("invalid rotate: {}", x),
-                }
-            },
-            _ => panic!("invalid instruction {}", s),
-        }
-        Some(())
-    }
-}
+use num_integer::Integer;
 
 fn main() {
-    const DATA: &str = include_str!("../inputs/day12.txt");
+    //const DATA: &str = include_str!("../inputs/day13.txt");
+    /*
+    const DATA: &str = "17,x,13,19";
+    let mut lines = DATA.lines();
+    //let my_time = lines.next().unwrap().parse::<isize>().unwrap();
+    let (times, buses): (Vec<isize>, Vec<isize>) = lines
+        .next()
+        .unwrap()
+        .split(',')
+        .enumerate()
+        // throw away indices with x, and snap into 2 vecs
+        .filter_map(|(t, s)| s.parse::<isize>().map(|num| (t as isize, num)).ok())
+        .unzip::<_, _, Vec<_>, Vec<_>>();
 
-    let mut boat = BoatNavigation::default();
+    dbg!(&times);
+    dbg!(&buses);
+    */
+    /*
+    let times = vec![0, 2, 3];
+    let buses = vec![17, 13, 19];
+    */
+    //let times = vec![0,2,3];
+    //let buses = vec![17,13,19];
+    //let data = "7,13,x,x,59,x,31,19";
+    //let data = "7,13";
 
-    for command in DATA.lines() {
-        if boat.run_one(command).is_none() {
-            println!("failed to update boat on `{}`", command);
-        }
-    }
+    // ^^ who needs tests, right?
+    const DATA: &str = include_str!("../inputs/day13.txt");
+    let data = DATA.lines().nth(1).unwrap();
 
-    println!("{:?}", boat);
-    println!("manhattan distance: {}", boat.manhattan());
-}
+    let (times, mut buses): (Vec<isize>, Vec<isize>) = data.lines()
+        .next()
+        .unwrap()
+        .split(',')
+        .enumerate()
+        // throw away indices with x, and snap into 2 vecs
+        .filter_map(|(t, s)| s.parse::<isize>().map(|num| (t as isize, num)).ok())
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+    dbg!(&times);
+    dbg!(&buses);
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    let big_n: isize = buses.iter().product();
+    let lcms = buses
+        .iter()
+        .enumerate()
+        .map(|(i, _bus)| {
+            // multiply everything except buses[i] together
+            // so -,1,2,3 then 0,-,2,3 then 0,1,-,3 etc
+            buses[0..i].iter().product::<isize>() * buses[i + 1..].iter().product::<isize>()
+        })
+        .collect::<Vec<_>>();
 
-    #[test]
-    fn parse_one_command() {
-        let mut boat = BoatNavigation::default();
+    let coeffs = buses.iter().zip(lcms.iter())
+        // giving us [(3, 140), (4, 105), (5, 84), (7, 60)]
+        .map(|(&bus, product)| {
+            // things to google:
+            // chinese remainder theorem
+            // modular inverse
+            let gcd = product.extended_gcd(&bus);
+            (gcd.x % bus + bus) % bus
+        })
+        .collect::<Vec<isize>>();
 
-        boat.run_one("F10").unwrap();
-        assert_eq!(
-            boat,
-            BoatNavigation {
-                waypoint_x: 10,
-                waypoint_y: 1,
-                ship_x: 100,
-                ship_y: 10,
-            }
-        );
+    let r = times.iter()
+        .zip(lcms.iter())
+        .zip(coeffs.iter())
+        .map(|((&t, &lcm), &coeff)| {
+            println!("({}, {}, {})", t, lcm, coeff);
+            t * lcm * coeff
+        })
+        .sum::<isize>();
 
-        boat.run_one("N3").unwrap();
-        assert_eq!(
-            boat,
-            BoatNavigation {
-                waypoint_x: 10,
-                waypoint_y: 4,
-                ship_x: 100,
-                ship_y: 10,
-            }
-        );
 
-        boat.run_one("F7").unwrap();
-        assert_eq!(
-            boat,
-            BoatNavigation {
-                waypoint_x: 10,
-                waypoint_y: 4,
-                ship_x: 170,
-                ship_y: 38,
-            }
-        );
-
-        boat.run_one("R90").unwrap();
-        assert_eq!(
-            boat,
-            BoatNavigation {
-                waypoint_x: 4,
-                waypoint_y: -10,
-                ship_x: 170,
-                ship_y: 38,
-            }
-        );
-
-        boat.run_one("R180").unwrap();
-        assert_eq!(
-            boat,
-            BoatNavigation {
-                waypoint_x: -4,
-                waypoint_y: 10,
-                ship_x: 170,
-                ship_y: 38,
-            }
-        );
-
-        boat.run_one("L180").unwrap();
-        assert_eq!(
-            boat,
-            BoatNavigation {
-                waypoint_x: 4,
-                waypoint_y: -10,
-                ship_x: 170,
-                ship_y: 38,
-            }
-        );
-
-        boat.run_one("F11").unwrap();
-        assert_eq!(
-            boat,
-            BoatNavigation {
-                waypoint_x: 4,
-                waypoint_y: -10,
-                ship_x: 214,
-                ship_y: -72,
-            }
-        );
-
-        assert_eq!(boat.manhattan(), 286);
-    }
+    println!("times:  {:?}", times);
+    println!("lcms:   {:?}", lcms);
+    println!("coeffs: {:?}", coeffs);
+    println!("big_n: {:?}", big_n);
+    println!("r: {:?}", r);
+    println!("r % big_n: {:?}", r % big_n);
+    println!("big_n - r: {:?}", big_n - r);
+    println!("big_n - r % big_n: {:?}", big_n - r % big_n);
 }

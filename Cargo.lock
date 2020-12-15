@@ -16,6 +16,7 @@ dependencies = [
  "daggy",
  "lazy_static",
  "num",
+ "num-integer",
  "regex",
  "thiserror",
 ]
