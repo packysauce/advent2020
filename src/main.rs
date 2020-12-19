@@ -7,6 +7,7 @@ use num::Integer;
 struct DumbMask {
     and_mask: u64,
     or_mask: u64,
+    floating_bits: Vec<usize>,
 }
 
 impl Default for DumbMask {
@@ -14,24 +15,43 @@ impl Default for DumbMask {
         DumbMask {
             and_mask: u64::MAX,
             or_mask: 0,
+            floating_bits: Vec::new(),
         }
     }
 }
 
-impl<'a> std::ops::BitOr<&'a DumbMask> for u64 {
-    type Output = u64;
+impl DumbMask {
+    fn value_mask(&self, rhs: u64) -> u64 {
+        rhs & self.and_mask | self.or_mask
+    }
 
-    fn bitor(self, rhs: &'a DumbMask) -> Self::Output {
-        self & rhs.and_mask | rhs.or_mask
+   fn address_mask(&self, rhs: usize) -> Vec<usize> {
+        let mut masks = Vec::new();
+        for pos in 0..(1 << self.floating_bits.len()) {
+            let mut tmp = rhs as u64 | self.or_mask;
+            for (i, replace_i) in self.floating_bits.iter().enumerate() {
+                let modify = 1 << replace_i;
+                if pos & (1 << i) != 0 {
+                    tmp |= modify;
+                } else {
+                    tmp &= !modify;
+                };
+            }
+            masks.push(tmp as usize);
+        }
+        masks
     }
 }
 
 impl std::str::FromStr for DumbMask {
     type Err = ();
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> { 
+        let reversed = s.chars().rev().collect::<String>();
         let mut mask = DumbMask::default();
-        for (i, c) in s.chars().rev().enumerate() {
+        mask.floating_bits = reversed.match_indices('X').map(|(bit, _)| bit).collect();
+
+        for (i, c) in reversed.chars().enumerate() {
             match c {
                 'X' => {
                     mask.and_mask |= 1 << i;
@@ -78,15 +98,11 @@ impl std::str::FromStr for Command {
     }
 }
 
-fn main() {
-    /*
-    let data = "mask = XXXXXXXXXXXXXXXXXXXXXXXXXXXXX1XXXX0X\n\
-                     mem[8] = 11\n\
-                     mem[7] = 101\n\
-                     mem[8] = 0";
-                     */
-    let data = include_str!("../inputs/day14.txt");
-    let mut memory: HashMap<usize, u64> = HashMap::new();
+type Memory = HashMap<usize, u64>;
+
+fn go(data: &str) -> (Memory, Memory) {
+    let mut day1: HashMap<usize, u64> = HashMap::new();
+    let mut day2: HashMap<usize, u64> = HashMap::new();
 
     let commands = data
         .lines()
@@ -98,19 +114,35 @@ fn main() {
         match command {
             Command::SetMask(new_mask) => mask = new_mask,
             Command::SetMem(loc, value) => {
-                let new_value = value | &mask;
-                memory
+                let new_value = mask.value_mask(value);
+                day1
                     .entry(loc)
                     .and_modify(|f| *f = new_value)
                     .or_insert(new_value);
+                for loc in mask.address_mask(loc) {
+                    day2.entry(loc)
+                        .and_modify(|f| *f = value)
+                        .or_insert(value);
+                }
             }
         }
     }
+    (day1, day2)
+}
 
-    let output: u64 = memory
-        .values()
-        .sum();
-    println!("sum is {}", output);
+fn main() {
+    /*
+    let data = "mask = XXXXXXXXXXXXXXXXXXXXXXXXXXXXX1XXXX0X\n\
+                     mem[8] = 11\n\
+                     mem[7] = 101\n\
+                     mem[8] = 0";
+                     */
+    let data = include_str!("../inputs/day14.txt");
+
+    let (day1, day2) = go(data);
+
+    println!("day1 sum is {}", day1.values().sum::<u64>());
+    println!("day2 sum is {}", day2.values().sum::<u64>());
 }
 
 #[cfg(test)]
@@ -129,6 +161,27 @@ mod tests {
             0b0000000000000000000000000000000000000000000000000000000001000000
         );
     }
+
+    #[test]
+    fn test_machine() {
+        let data = "mask = 000000000000000000000000000000X1001X\n\
+                         mem[42] = 100\n\
+                         mask = 00000000000000000000000000000000X0XX\n\
+                         mem[26] = 1";
+
+        let (_, addr_mem) = go(data);
+        assert_eq!(addr_mem.get(&16), Some(&1));
+        assert_eq!(addr_mem.get(&17), Some(&1));
+        assert_eq!(addr_mem.get(&18), Some(&1));
+        assert_eq!(addr_mem.get(&19), Some(&1));
+        assert_eq!(addr_mem.get(&24), Some(&1));
+        assert_eq!(addr_mem.get(&25), Some(&1));
+        assert_eq!(addr_mem.get(&26), Some(&1));
+        assert_eq!(addr_mem.get(&27), Some(&1));
+        assert_eq!(addr_mem.get(&58), Some(&100));
+        assert_eq!(addr_mem.get(&59), Some(&100));
+    }
+
     #[test]
     fn parse_smoke_test() {
         let ugh = DumbMask::default();
@@ -141,10 +194,33 @@ mod tests {
     }
 
     #[test]
+    fn address_mask_works() {
+        let mask: DumbMask = "X1001X".parse().unwrap();
+        assert_eq!(mask.address_mask(0b101010), vec![
+            0b011010,
+            0b011011,
+            0b111010,
+            0b111011,
+        ]);
+
+        let mask: DumbMask = "X0XX".parse().unwrap();
+        assert_eq!(mask.address_mask(26), vec![
+            0b10000,
+            0b10001,
+            0b10010,
+            0b10011,
+            0b11000,
+            0b11001,
+            0b11010,
+            0b11011,
+        ])
+    }
+
+    #[test]
     fn math_works() {
         let mask: DumbMask = "1XXXX0X".parse().unwrap();
-        assert_eq!(11u64 | &mask, 73);
-        assert_eq!(101u64 | &mask, 101);
-        assert_eq!(0u64 | &mask, 64);
+        assert_eq!(mask.value_mask(11), 73);
+        assert_eq!(mask.value_mask(101), 101);
+        assert_eq!(mask.value_mask(0), 64);
     }
 }
